@@ -1,0 +1,760 @@
+## PROJECT ON  PREDICTING POSTOPERATIVE SURVIVAL TIME FOLLOWING LIVER SURGERY: A STUDY USING CLINICAL SCORES IN MALE PATIENTS.
+
+A hospital surgical unit aimed to predict survival outcomes in patients undergoing a specific type of liver surgery. The dataset includes data from 54 randomly selected male patients, each of whom underwent preoperative evaluation. The following variables were extracted for analysis:
+
+- ID : A unique, de-identified identifier for each patient.
+- BCS (Blood Clotting Score) : A score representing the patient's blood clotting ability.
+- PI (Prognostic Index Score) : A composite score that evaluates the patient's overall prognosis, which includes age and other clinical factors.
+- EF (Enzyme Function Test Score) : A score representing the patient's enzyme function level.
+- LF (Liver Function Test Score) : A score representing the patient's liver function.
+- SurvTime (Survival Time) : The survival time in years, measured during a follow-up study.
+
+
+
+```{r}
+
+## Load necessary libraries
+library(flextable)   # For creating tables for Word output
+library(car)         # For QQ plot, VIF, and linear hypothesis
+library(nortest)     # For normality tests (e.g., Anderson-Darling)
+library(psych)       # For descriptive stats
+library(DescTools)   # For additional stats
+library(GGally)      # For pairwise correlation plots
+library(MASS)        # For robust regression
+library(broom)       # Provides the augment function
+library(dplyr)       # For Data manipulation
+library(lmtest)      # For Breusch-Pagan test for homoscedasticity
+library(olsrr)       # For Mallows' Cp and model selection functions
+library(leaps)
+
+set.seed (830048)
+```
+
+
+
+
+#1.Read the data
+
+```{r}
+mydata = read.csv("LiverStudy.csv", header = TRUE)
+str(mydata)
+```
+
+
+#2. Summary statistics of all the variables
+
+```{r}
+vars <- c("BCS", "PI", "EF", "LF", "SurvTime")
+
+# Descriptive Statistics for  Variables
+vars_summary <- lapply(vars, function(var) {
+  data <- mydata[[var]]
+  
+  n <- sum(!is.na(data))                  # Count of non-missing values
+  nmiss <- sum(is.na(data))               # Count of missing values
+  mean_val <- mean(data, na.rm = TRUE)    # Mean
+  sd_val <- sd(data, na.rm = TRUE)        # Standard Deviation
+  se_val <- sd_val / sqrt(n)              # Standard Error
+  lcl_95 <- mean_val - qt(0.975, df = n-1) * se_val  # Lower 95% CI
+  ucl_95 <- mean_val + qt(0.975, df = n-1) * se_val  # Upper 95% CI
+  
+  # Return a named list for each variable
+  data.frame(
+    Variable = var,
+    n = n,
+    nmiss = nmiss,
+    Mean = mean_val,
+    SD = sd_val,
+    SE = se_val,
+    LCL_95 = lcl_95,
+    UCL_95 = ucl_95
+  )
+})
+
+# Combine all summaries into one table for continuous variables
+summary_df <- bind_rows(vars_summary)
+
+# Print the continuous variables summary table
+print(summary_df)
+
+
+```
+
+
+#3. Multiple linear regression
+
+The assumptions of MLR are:
+
+- Linearity: The relationship between predictors and outcome is linear.
+- Independence of Errors: Errors are independent across observations.
+- Homoscedasticity: Residuals have constant variance across levels of predictors.
+- Normality of Residuals: Errors are normally distributed.
+- No Perfect Multicollinearity (MLR only): Predictors are not highly correlated.
+- Outliers/Influential Points: Outliers should be minimal or accounted for.
+
+
+# Assessing the Linearity for the MLR:
+
+To assess normality of the variables, we used a q-q plot and Shapiro-Wilk normality test.
+
+The following are the q-q plots for the all variables, which indicate that:
+(1)	Blood clotting score follows normal distribution (data points are close to the straight line).
+(2) Prognostic index follows normal distribution (data points are close to the straight line).
+(3)	Enzyme Function test score follows normal distribution (data points are close to the straight line).
+(4) Liver Function test score follows normal distribution (data points are close to the straight line)
+(5) Survival Time does not follows normal distribution (there is departure from the straight line in the upper right corner);
+
+```{r}
+# Set up the 3x2 layout and adjust margins
+par(mfrow=c(3, 2), mar=c(4, 3, 3, 1))  
+
+# Blood clotting score
+qqnorm(mydata$BCS,
+       main = "Normal QQ plot \nof Blood clotting score", 
+       xlab="Normal Quantiles")
+qqline(mydata$BCS, datax = FALSE, distribution = qnorm, probs = c(0.25, 0.75))
+
+# Prognostic Index Score
+qqnorm(mydata$PI,
+       main = "Normal QQ plot \nof Prognostic Index Score", 
+       xlab="Normal Quantiles")
+qqline(mydata$PI, datax = FALSE, distribution = qnorm, probs = c(0.25, 0.75))
+
+# Enzyme Function Test Score
+qqnorm(mydata$EF,
+       main = "Normal QQ plot \nof Enzyme Function Test Score", 
+       xlab="Normal Quantiles")
+qqline(mydata$EF, datax = FALSE, distribution = qnorm, probs = c(0.25, 0.75))
+
+# Liver Function Test Score
+qqnorm(mydata$LF,
+       main = "Normal QQ plot \nof Liver Function Test Score", 
+       xlab="Normal Quantiles")
+qqline(mydata$LF, datax = FALSE, distribution = qnorm, probs = c(0.25, 0.75))
+
+# Survival Time
+qqnorm(mydata$SurvTime,
+       main = "Normal QQ plot \nof Survival Time", 
+       xlab="Normal Quantiles")
+qqline(mydata$SurvTime, datax = FALSE, distribution = qnorm, probs = c(0.25, 0.75))
+
+```
+
+
+The following table summarizes the results for Shapiro-Wilk test
+
+The p values for Blood clotting score, prognostic index , enzyme function test and liver function test score are greater 0.05, thus we have no evidence to reject the null hypothesis of normality. Therefore, we conclude that Blood clotting score, prognostic index , enzyme function test and liver function test score  follow normal distribution. The p-value for the Survival time was less than 0.05, therefore we reject the null hypothesis of normality. Thus, we conclude that Survival time does not follow the normal distribution.
+
+```{r}
+p.BCS <- shapiro.test(mydata$BCS)$p
+
+p.PI <- shapiro.test(mydata$PI)$p
+
+p.EF <- shapiro.test(mydata$EF)$p
+
+p.LF <- shapiro.test(mydata$LF)$p
+
+p.SurvTime <- shapiro.test(mydata$SurvTime)$p
+
+df.shapiro <- data.frame(Variable = c("BCS", "PI",
+                                 "EF", "LF", "SurvTime"),
+                    p_value = round(c(p.BCS, p.PI, p.EF, p.LF, p.SurvTime),5),
+                    Conclusion = c("normal", "normal", "normal", "normal", "not normal"))
+
+flextable(df.shapiro)  %>% width(width = 1.5) 
+```
+
+
+
+The scatter plots analyze the relationship between survival time and four variables (blood clotting score, prognostic index, enzyme function test, and liver function test) by comparing a linear trend (black line) with a smoother, non-linear trend (blue line):
+
+- Blood Clotting Score and Survival Time: The smoother trend (blue line) indicates a slightly non-linear relationship, with survival time increasing unevenly as the blood clotting score increases.The linear trend (black line) does not fully capture this variability. Overall, a weak non-linear association is suggested.
+
+- Prognostic Index and Survival Time: The smoother (blue) and linear (black) trends are nearly identical, suggesting a linear relationship.Survival time consistently increases as the prognostic index increases.Overall, a linear and strong positive association.
+
+- *Enzyme Function Test and Survival Time*: The smoother trend (blue line) shows a clear non-linear relationship, with survival time increasing more steeply at higher enzyme function test scores. The linear trend (black line) deviates significantly from the smoother trend. Overall,a strong non-linear association.
+
+- Liver Function Test and Survival Time:The smoother trend (blue line) suggests a slightly curved, non-linear relationship, while the linear trend (black line) only approximates the general trend. Overall, a weak non-linear association.
+
+In summary, 
+The prognostic index has a strong, linear association with survival time. Enzyme function test demonstrates a strong non-linear association, while blood clotting score and liver function test show weaker non-linear trends.
+
+```{r}
+# Divide the screen into 2 rows and 2 columns for 4 plots
+par(mfrow=c(2,2))
+
+# Plot for Blood Clotting Score (BCS) vs Survival Time
+plot(mydata$BCS, mydata$SurvTime, 
+     main = "Scatter Plot of \nBlood Clotting Score and Survival Time", 
+     xlab = "Blood Clotting Score", 
+     ylab = "Survival Time", 
+     pch = 19)  # pch=19 for solid circles
+# Linear trend
+abline(lm(SurvTime ~ BCS, data=mydata), col = "black") 
+# Smoothing trend
+lines(lowess(mydata$BCS, mydata$SurvTime), col = "blue")
+
+
+# Plot for Prognostic Index (PI) vs Survival Time
+plot(mydata$PI, mydata$SurvTime, 
+     main = "Scatter Plot of \nPrognostic Index and Survival Time", 
+     xlab = "Prognostic Index", 
+     ylab = "Survival Time", 
+     pch = 19)
+# Linear trend
+abline(lm(SurvTime ~ PI, data=mydata), col = "black") 
+# Smoothing trend
+lines(lowess(mydata$PI, mydata$SurvTime), col = "blue")
+
+
+# Plot for Enzyme Function Test (EF) vs Survival Time
+plot(mydata$EF, mydata$SurvTime, 
+     main = "Scatter Plot of \nEnzyme Function Test and Survival Time", 
+     xlab = "Enzyme Function Test Score", 
+     ylab = "Survival Time", 
+     pch = 19)
+# Linear trend
+abline(lm(SurvTime ~ EF, data=mydata), col = "black") 
+# Smoothing trend
+lines(lowess(mydata$EF, mydata$SurvTime), col = "blue")
+
+
+# Plot for Liver Function Test (LF) vs Survival Time
+plot(mydata$LF, mydata$SurvTime, 
+     main = "Scatter Plot of \nLiver Function Test and Survival Time", 
+     xlab = "Liver Function Test Score", 
+     ylab = "Survival Time", 
+     pch = 19)
+# Linear trend
+abline(lm(SurvTime ~ LF, data=mydata), col = "black") 
+# Smoothing trend
+lines(lowess(mydata$LF, mydata$SurvTime), col = "blue")
+
+```
+
+
+Since one of variables was not normal and there it not clear linear relationships between variables, Spearman correlation coefficient would be a good fit for all continuous variables of the models to see the strength of  relationship between the dependent variable and all continuous independent variables. The following table summarizes Spearman Correlation coefficient for the all models.
+
+Spearman Correlations with Survival Time:
+BCS (Blood Clotting Score): A weak positive correlation of 0.193, indicating a slight relationship with survival time.
+PI (Prognostic Index Score): A moderate positive correlation of 0.659, suggesting a notable positive relationship with survival time.
+EF (Enzyme Function Test Score): A strong positive correlation of 0.734, indicating a significant positive association with survival time.
+LF (Liver Function Test Score): A moderate positive correlation of 0.677, also suggesting a substantial positive relationship with survival time.
+
+```{r}
+
+# Perform Spearman correlation test between Survival Time and all independent variables
+cor_results <- data.frame(
+  Variable = c("BCS", "PI", "EF", "LF"),
+  Spearman_Correlation = c(
+    cor.test(mydata$SurvTime, mydata$BCS, method = "spearman", use = "complete.obs")$estimate,
+    cor.test(mydata$SurvTime, mydata$PI, method = "spearman", use = "complete.obs")$estimate,
+    cor.test(mydata$SurvTime, mydata$EF, method = "spearman", use = "complete.obs")$estimate,
+    cor.test(mydata$SurvTime, mydata$LF, method = "spearman", use = "complete.obs")$estimate
+  ),
+  P_Value = c(
+    cor.test(mydata$SurvTime, mydata$BCS, method = "spearman", use = "complete.obs")$p.value,
+    cor.test(mydata$SurvTime, mydata$PI, method = "spearman", use = "complete.obs")$p.value,
+    cor.test(mydata$SurvTime, mydata$EF, method = "spearman", use = "complete.obs")$p.value,
+    cor.test(mydata$SurvTime, mydata$LF, method = "spearman", use = "complete.obs")$p.value
+  )
+)
+
+# Format the Spearman correlation and p-value to 6 decimal places
+cor_results$Spearman_Correlation <- sprintf("%.8f", cor_results$Spearman_Correlation)
+cor_results$P_Value <- sprintf("%.8f", cor_results$P_Value)
+
+# Create the flextable
+flextable(cor_results) %>%
+  set_table_properties(width = 1, layout = "autofit") %>%
+  bold(j = "Variable")
+
+```
+
+
+
+# Fitting the full MLR model
+
+```{r}
+full_model=lm(SurvTime ~ BCS + PI + EF + LF,data = mydata)
+summary(full_model) 
+```
+
+
+Model with only  significant predictors
+
+```{r}
+reduced_model=lm(SurvTime ~ BCS + PI + EF ,data = mydata)
+summary(reduced_model)
+```
+
+
+The results showed that removal of LF did not result in a significant reduction in model fit (p = 0.6343), indicating that LF could be excluded without sacrificing predictive power.
+
+```{r}
+# F-test comparing the full and reduced models
+anova(full_model, reduced_model)
+```
+
+
+
+# Sequential Selection Methods
+
+All these methods reinforced that BCS, PI, and EF remained significant predictors, with the reduced model showing a high Adjusted R-squared of 0.926 and a low Cp value of 3.229, suggesting a well-fitting model with minimal risk of overfitting.
+
+```{r}
+# Fit the full model
+full_model <- lm(SurvTime ~ BCS + PI + EF + LF, data = mydata)
+
+# Forward selection
+forward_model <- regsubsets(SurvTime ~ BCS + PI + EF + LF, data = mydata, method = "forward", nvmax = 4)
+summary(forward_model)
+summary(forward_model)$adjr2
+summary(forward_model)$cp
+
+# Backward elimination
+backward_model <- regsubsets(SurvTime ~ BCS + PI + EF + LF, data = mydata, method = "backward", nvmax = 4)
+summary(backward_model)
+summary(backward_model)$adjr2
+summary(backward_model)$cp
+
+# Stepwise regression (both directions)
+stepwise_model <- regsubsets(SurvTime ~ BCS + PI + EF + LF, data = mydata, method = "seqrep", nvmax = 4)
+summary(stepwise_model)
+summary(stepwise_model)$adjr2
+summary(stepwise_model)$cp
+
+
+```
+ 
+
+# Assessing the assumption of normality and constant variance of residual
+
+Assessing the assumptions of normality and constant variance of fitted model. We can see that both the normality and constant variance assumptions are not satisfied. Further, shapiro wilk test p-value <0.001, rejecting the null hypothesis of normality. Therefore, we conclude that variable transformations are needed. 
+ 
+
+```{r}
+# Divide the screen into 1 row and 2 columns for 2 plots
+par(mfrow=c(1,2))
+
+# Create a Q-Q plot for the residuals of the reduced model
+qqnorm(residuals(reduced_model), 
+       main = "Q-Q Plot of Residuals",       # Main title
+       xlab = "Theoretical Quantiles",       # X-axis label
+       ylab = "Sample Quantiles",            # Y-axis label
+       col = "black",                         # Color of the points
+       pch = 19)                             # Plotting character (point type)
+qqline(residuals(reduced_model), col = "red", lwd = 2)  # Line color and width
+
+
+# Residuals vs. Fitted plot
+plot(fitted(reduced_model), residuals(reduced_model), 
+     main = "Residuals vs. Fitted", 
+     xlab = "Fitted values", 
+     ylab = "Residuals")
+abline(h = 0, col = "red")
+
+
+# Shapiro Wilk test
+shapiro.test(residuals(reduced_model))
+
+# Perform Breusch-Pagan test for homoscedasticity
+library(lmtest)
+bptest(reduced_model)
+
+```
+
+
+
+
+#Variable tranformation
+
+```{r}
+#[ii].Log transformation:
+mydata$log_SurvTime <- log(mydata$SurvTime)
+log_model <- lm(log_SurvTime ~ BCS + PI + EF, data = mydata)
+
+
+#[iii].Square root transformation:
+mydata$sqrt_SurvTime <- sqrt(mydata$SurvTime)
+sqrt_model <- lm(sqrt_SurvTime ~ BCS + PI + EF, data = mydata)
+
+
+#[iv].Inverse Transformation:
+mydata$inv_SurvTime <- 1/ mydata$SurvTime
+inv_model <- lm(inv_SurvTime ~ BCS + PI + EF, data = mydata)
+
+
+#[v].Polynomial Transformation
+polynomial_model <- lm(SurvTime ~ poly(BCS, degree = 2) + poly(PI, degree = 2) + poly(EF, degree = 2) , data = mydata)
+
+```
+
+
+
+
+#Assessing the normality and homoscedasticity of transformed residuals 
+
+The assumption of normality was assessed using QQ plot and confirmed with shapiro wilk test
+
+a. The non-transformed Q-Q plot shows a clear deviation of residuals from the diagonal line, particularly at the tails, indicating a significant violation of normality. 
+b. The log-transformed Q-Q plot, on the other hand, demonstrates a much closer alignment of residuals with the diagonal, suggesting that this transformation effectively normalizes the data. 
+c. The square-transformed Q-Q plot shows moderate improvement, with slight deviations at the extremes
+d.  The inverse-transformed Q-Q plot exhibits substantial deviations at both ends, indicating that this transformation does not adequately address normality. 
+E. Lastly, the polynomial-transformed Q-Q plot reveals mild deviations, particularly at the tails, showing that it partially addresses the issue but is less effective than the log transformation.
+
+```{r, gir.width = 12, fig.height = 8}
+# Normality Check
+par(mfrow = c(3,2))
+plot(reduced_model, which = 2, main = "Non-transformed", xlab = "Normal Quantiles", pch=16) # QQ plot
+plot(log_model, which = 2, main = "Log-Transformed", xlab = "Normal Quantiles", pch=16) # QQ plot
+plot(sqrt_model, which = 2, main = "Square-Transformed", xlab = "Normal Quantiles", pch=16) # QQ plot
+plot(inv_model, which = 2, main = "Inverse-Transformed", xlab = "Normal Quantiles", pch=16) # QQ plot
+plot(polynomial_model, which = 2, main = "Polynomial-Transformed", xlab = "Normal Quantiles", pch=16) # QQ plot
+```
+
+
+The residuals vs fitted plots examine the distribution of residuals across fitted values to check for patterns or heteroscedasticity.
+a. Non-Transformed:The plot displays a clear U-shaped pattern, indicating non-linearity in the relationship between variables and potential heteroscedasticity.
+b. Log-Transformed: The residuals are relatively evenly distributed, with no apparent patterns, suggesting the log-transformation effectively stabilizes variance and improves linearity.
+c.Square-Transformed: A slight U-shaped pattern persists, though less pronounced than in the non-transformed data, indicating partial improvement.
+Inverse-Transformed:
+d. A strong U-shaped pattern is present, suggesting poor correction for non-linearity and
+variance instability.
+e. Polynomial-Transformed: The residuals still show some curvature, although less pronounced than in the non-transformed plot, implying moderate improvement.
+
+```{r, gir.width = 12, fig.height = 8}
+# constant variance Check
+par(mfrow = c(3,2), mar = c (4, 4, 4, 4))
+plot(reduced_model, which = 1, main = "Non-transformed",  pch=16) # QQ plot
+plot(log_model, which = 1, main = "Log-Transformed",  pch=16) # QQ plot
+plot(sqrt_model, which = 1, main = "Square-Transformed",  pch=16) # QQ plot
+plot(inv_model, which = 1, main = "Inverse-Transformed",  pch=16) # QQ plot
+plot(polynomial_model, which = 1, main = "Polynomial-Transformed",  pch=16) # QQ plot
+
+```
+
+
+
+The Shapiro-Wilk test results are as follows: 
+The non-transformed (p = 0.000159) and inverse-transformed (p = 0.000145) data are not normal, while the log-transformed (p = 0.852699), square-root transformed (p = 0.289324), and polynomial-transformed (p = 0.800037) data exhibit normality.
+
+```{r}
+
+# Perform Shapiro-Wilk test for normality on residuals
+p.reduced <- shapiro.test(residuals(reduced_model))$p
+p.log <- shapiro.test(residuals(log_model))$p
+p.sqrt <- shapiro.test(residuals(sqrt_model))$p
+p.inv <- shapiro.test(residuals(inv_model))$p
+p.poly <- shapiro.test(residuals(polynomial_model))$p
+
+# Create data frame with p-values and conclusions
+df.shapiro <- data.frame(
+  Variable = c("Non-transformed", "Log Transformed", "Square-root Transformed", "Inverse Transformed","Polynomial Transformed"),
+  p_value = round(c(p.reduced, p.log, p.sqrt, p.inv, p.poly), 6),
+  Conclusion = c(
+    ifelse(p.reduced < 0.05, "not normal", "normal"),
+    ifelse(p.log < 0.05, "not normal", "normal"),
+    ifelse(p.sqrt < 0.05, "not normal", "normal"),
+    ifelse(p.inv < 0.05, "not normal", "normal"),
+    ifelse(p.poly < 0.05, "not normal", "normal")
+  )
+)
+
+# Display the table using flextable
+flextable(df.shapiro) %>% width(width = 1.5)
+
+```
+
+
+The Breusch-Pagan test for homoscedasticity results revealed that non-transformed (p = 0.877869), log-transformed (p = 0.902677), and square-root transformed (p = 0.853801) data meet the assumption of homoscedasticity. However, the inverse-transformed (p = 0.039955) and polynomial-transformed (p = 0.046428) data show significant heteroscedasticity, confirming the patterns observed in the residuals vs. fitted plots. 
+
+```{r}
+
+# Perform Breusch-Pagan test for homoscedasticity
+p.reduced <- bptest(reduced_model)$p.value
+p.log <- bptest(log_model)$p.value
+p.sqrt <- bptest(sqrt_model)$p.value
+p.inv <- bptest(inv_model)$p.value
+p.poly <- bptest(polynomial_model)$p.value
+
+# Create data frame with the p-values and conclusions
+df_Breusch_Pagan <- data.frame(
+  Variable = c("Non-transformed", "Log Transformed", "Square-root Transformed", "Inverse Transformed","Polynomial Transformed"),
+  p_value = round(c(p.reduced, p.log, p.sqrt, p.inv, p.poly), 6),
+  Conclusion = c(
+    ifelse(p.reduced < 0.05, "not normal", "normal"),
+    ifelse(p.log < 0.05, "not normal", "normal"),
+    ifelse(p.sqrt < 0.05, "not normal", "normal"),
+    ifelse(p.inv < 0.05, "not normal", "normal"),
+    ifelse(p.poly < 0.05, "not normal", "normal")
+  )
+)
+
+# Display the table using flextable
+flextable(df_Breusch_Pagan) %>% width(width = 1.5)
+
+```
+
+
+
+# Boxcox transformation
+
+```{r}
+library(MASS)
+
+# Apply Box-Cox transformation
+boxcox_results <- boxcox(reduced_model, lambda = seq(-2, 2, by = 0.1))
+
+# Identify optimal lambda
+optimal_lambda <- boxcox_results$x[which.max(boxcox_results$y)]
+print(paste("Optimal Lambda:", optimal_lambda))
+
+# If optimal_lambda is close to 0, log transformation is suggested
+# If optimal_lambda is close to 0.5, square root transformation is suggested
+# If optimal_lambda is close to -1, then the inverse transformation is suggested
+```
+
+The Box-Cox transformation further supported this choice, yielding a lambda value of -0.020, which is close to 0, suggesting that the log transformation (log(x)) effectively addresses the skewness in the data and normalizes the residuals. 
+
+
+
+
+```{r}
+summary(log_model)
+```
+
+
+# Detection of multicollinearity
+
+```{r, fig.width = 10, fig.height= 5}
+# Create pairwise correlation plot
+ggpairs(mydata[,c("BCS", "PI", "EF", "LF")])
+```
+
+
+
+```{r}
+vif(log_model)
+```
+
+
+
+# Interaction term
+
+```{r}
+# Fit log_model with interaction terms
+interaction_model <- lm(log_SurvTime ~ BCS * PI * EF, data = mydata)
+summary(interaction_model)
+```
+
+
+# Detection of outliers
+
+```{r}
+model.update = data.frame(augment(log_model))
+
+# Add the ID column to the augmented data
+model.update $ Obs_ID <- rep(1:dim(model.update)[1])
+
+# View the structure to check the added ID column
+save.var = c("log_SurvTime", ".fitted", ".resid", ".hat", ".std.resid", "Obs_ID")
+
+model.final = model.update[,save.var]
+
+## Get the R-Student
+model.final$ti = rstudent(log_model)
+
+ ## Relabel columns
+names(model.final)[1] = "yi"
+names(model.final)[2] = "yi_hat"
+names(model.final)[3] = "ei"
+names(model.final)[4] = "hii"
+names(model.final)[5] = "ri"
+
+```
+
+
+Compute sums of squares for the model
+
+```{r}
+SST = sum(anova(log_model)$'Sum Sq')
+SSE = sum(model.final$ei^2)
+SSR = SST - SSE
+
+SSR
+SSE
+SST
+```
+
+
+
+Compute rule of thumb for influential leverage points
+
+```{r}
+n = 54
+err_df = log_model$df.residual
+p = n - err_df
+
+hii_line=(2*p)/n
+```
+
+
+Plot values of R student values for each observation
+
+```{r}
+plot(model.final$Obs_ID,
+     model.final$ti,
+     xlab = "Observation",
+     xlim = c(1,54),
+     ylab = "R-Student (ti)",
+     ylim = c(-3,3))
+abline(a=2, b=0, col="red")
+abline(a=-2, b=0, col= "red")
+```
+
+
+Plot leverage points for each observation
+
+```{r}
+# Hat values plot
+hii_line = (2 * p) / n  # Leverage threshold
+plot(model.final$Obs_ID,
+     model.final$hii,
+     xlab = "Observation",
+     ylab = "Hat Diagonal (hii)",
+     ylim = c(0, max(model.final$hii) + 0.05))
+abline(a = hii_line, b = 0, col = "red")  # Leverage threshold line
+
+```
+
+
+
+```{r}
+# Identify observations with R-student values greater than 2 or less than -2
+outliers <- model.final[abs(model.final$ti) > 2, ]
+
+# Get the number of predictors (p) from the model
+p <- length(coef(log_model))  # This gives the number of coefficients, including the intercept
+
+# Get the number of observations (n)
+n <- nrow(mydata)
+
+# Calculate the leverage threshold
+high_leverage_threshold <- (2 * p) / n
+
+# Print the result
+high_leverage_threshold
+
+# Identify high leverage points
+high_leverage <- model.final[model.final$hii > high_leverage_threshold, ]
+
+# View the outliers and high leverage points
+print(outliers)
+print(high_leverage)
+
+```
+
+
+Compute DFFits and DFBeta values
+
+```{r}
+## Get other diagnostics
+model.final$DFFITS  = dffits(log_model)
+model.final$Cooks_d = model.update$.cooksd
+model.final$DFBETA  = dfbeta(log_model)
+```
+
+
+Compute rule of thumb values to identify influential observations
+
+```{r}
+# Rules of Thumb
+DFFIT_line  = 2*sqrt(p/(n))
+DFBETA_line = 2/sqrt(n)
+COOKSD_line = 4/(n)
+```
+
+
+Plot DFFits for each observation
+
+```{r}
+# Divide the screen into 1 row and 1 columns
+par(mfrow=c(1,2))
+
+# DFFITS plot
+DFFIT_line = 2 * sqrt(p / n)  # DFFITS threshold
+plot(model.final$Obs_ID,
+     model.final$DFFITS,
+     ylab = "DFFITS",
+     xlab = "Observation",
+     ylim = c(-20,20),
+     main = "DFFITS Plot")
+abline(a=DFFIT_line,0, col = "red")  # Upper threshold
+abline(a=-DFFIT_line,0, col= "red")  # Lower threshold
+
+# Cook's D plot
+COOKSD_line = 4 / n  # Cook's D threshold
+plot(model.final$Obs_ID,
+     model.final$Cooks_d,
+     ylab = "Cook's D",
+     xlab = "Observation",
+     ylim = c(0,1),
+     main = "Cook's D Plot")
+abline(a=COOKSD_line, 0, col="red")  # Threshold line for influential points
+
+```
+
+
+# Effect of fitting the model without few observations
+
+Refit without Observation 15
+
+```{r}
+## create a new dataset 
+mydata_15 = data.frame(mydata)
+# Set a SurvTime value for observation 15 to NA. 
+# This way, R with omit this row when it fits the regression model 
+mydata_15$SurvTime[mydata_15$ID == 15] = NA
+
+final_model <- lm(log_SurvTime ~ BCS + PI + EF, data = mydata_15)
+summary(final_model)
+```
+
+Compare: 
+
+(1) residual calculated from the regression including observation 15 (y_15 - hat(y_15)) and 
+
+(2) the residual calculated for observation 15 based upon the regression done without observation 15 but using the same x values (y_15 - hat(y_15),{-15})
+
+```{r}
+#now, observation 15 is considered to be the new data point
+#use predict function to obtain this estimate
+newdata_15 = data.frame(mydata[mydata$ID == 15,])
+newdata_15$fitted = predict(final_model, newdata_15)
+newdata_15$residual = newdata_15$SurvTime - newdata_15$fitted
+newdata_15
+```
+
+
+The value of residual `r round(newdata_8$residual,3)`  represents the hypothetical prediction error experience if we use observation 15 as a validation of the regression.
+
+Note that this value is larger that the value of residual for observation 8, when this observation was used in the model.
+
+Residual for observation 15 when observation 15 was used for fitting the model
+
+```{r}
+abs(model.final$ei[model.final$Obs_ID == 15])
+```
+
+
+
+Residual for observation 15 when observation 15 was NOT used for fitting the model
+
+```{r}
+abs(newdata_15$residual)
+```
+
+
+
+
